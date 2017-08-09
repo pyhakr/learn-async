@@ -89,7 +89,7 @@ class Fetcher:
             urls_todo.remove(self.url)
             print('urls seen %i --> urls_todo %i' % (len(seen_urls), len(urls_todo)))
 
-            if len(seen_urls) > 250 or len(urls_todo) == 0:
+            if len(seen_urls) > 1000 or len(urls_todo) == 0:
                 stopped = True
 
 
