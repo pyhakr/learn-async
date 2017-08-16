@@ -23,7 +23,7 @@ class SpecialHeadset(Common):
         api = super().get_api()
         return '{} special headset api -->'.format(api)
 
-class Dut(SpecialHeadset, Headset):
+class Dut(Speaker, SpecialSpeaker):
     def __init__(self):
         for c in Dut.__mro__:
             print(c)

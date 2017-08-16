@@ -19,11 +19,23 @@ class Future:
         self._callbacks.append(fn)
 
     def set_result(self, result):
+        print("setting Future result to: {}".format(result))
         self.result = result
         for fn in self._callbacks:
+            print("calling callback: {}".format(fn))
             fn(self)
 
 class Task:
+    """
+    1. set Task co-routine to be passed in function
+    2. create Future, set result to None
+    3. call step which sends future result to co-routine
+
+    each time the co-routine yields a future
+     - we add Task.step to the future callback list
+     - when event loop triggers inner on_connected function of co-routine
+     - the future is resolved and Task.step is called again
+    """
     def __init__(self, coro):
         self.coro = coro
         f = Future()
@@ -32,10 +44,11 @@ class Task:
 
     def step(self, future):
         try:
+            print('Sending Future.result to co-routine')
             next_future = self.coro.send(future.result)
         except StopIteration:
             return
-
+        print('got next future from co-routine, adding step to call back list')
         next_future.add_done_callback(self.step)
 
 
@@ -64,7 +77,9 @@ class Fetcher:
         return parsed_links
 
     # Method on Fetcher class.
+    # 2. Then fetch runs until it yields a future, which the task captures as next_future
     def fetch(self):
+        print("*** fetch runs until it yields a future ***")
         sock = socket.socket()
         sock.setblocking(False)
         try:
@@ -75,10 +90,10 @@ class Fetcher:
         f = Future()
 
         def on_connected():
+            print("*** socket connected: clearing future result *** ")
             f.set_result(None)
             # print('connected: %s' % self.url)
             # selector.unregister(key.fd)
-            # #TODO: get the request format right to return page
             request = 'GET {} HTTP/1.1\r\nHost: www.uen.org\r\n\r\n'.format(self.url)
             sock.send(request.encode('utf-8'))
 
@@ -86,15 +101,31 @@ class Fetcher:
         selector.register(sock.fileno(),
                           EVENT_WRITE,
                           on_connected)
+
+        print("*** yield future to Task ***")
         yield f
 
         selector.unregister(sock.fileno())
         print('connected!')
 
+        while True:
+            f = Future()
+
+            def on_readable():
+                f.set_result(sock.recv(4096))
+
+            selector.register(sock.fileno(),
+                              EVENT_READ,
+                              on_readable)
+            print("READING: yielding future to Task")
+            chunk = yield f
+            selector.unregister(sock.fileno())
+            if chunk:
+                self.response += chunk
+            else:
+                print("Done Reading")
+                break
         # Register the next callback.
-        selector.register(sock.fileno(),
-                          EVENT_READ,
-                          self.read_response)
 
     # Method on Fetcher class.
     def read_response(self, key, mask):
@@ -128,8 +159,10 @@ class Fetcher:
                 stopped = True
 
 
-# Begin fetching http://xkcd.com/353/
+
 fetcher = Fetcher('/feeds/lists.shtml')
+# 1. starts the fetch generator by sending None into it.
+print('*** fetch generator started ***')
 Task(fetcher.fetch())
 
 
