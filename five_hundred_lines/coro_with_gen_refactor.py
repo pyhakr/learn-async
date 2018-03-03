@@ -58,25 +58,6 @@ class Fetcher:
         self.url = url
         self.sock = None
 
-    def parse_links(self):
-        parsed_links = set()
-        try:
-            for line in self.response.decode('utf-8').split('\r\n'):
-                if line.find('a href=') > 0:
-                    links_list = re.findall("<a\shref=\"((http|https):\/\/.+?)\"", line)
-                    for link_item in links_list:
-                        parsed_link, http_type = link_item
-                        if http_type == 'http':
-                            if parsed_link[-3::].lower() not in ['pdf', 'php', 'ocx']:
-                                parsed_links.add(parsed_link)
-                            # print("{}: {}".format(http_type, link))
-        except UnicodeDecodeError as decode_error:
-            return parsed_links
-
-        url_link_map[self.url] = parsed_links
-        return parsed_links
-
-    # Method on Fetcher class.
     # 2. Then fetch runs until it yields a future, which the task captures as next_future
     def fetch(self):
         global stopped
@@ -88,6 +69,8 @@ class Fetcher:
         except BlockingIOError:
             pass
 
+        f = Future()
+
         def on_connected():
             print("*** socket connected: clearing future result *** ")
             f.set_result(None)
@@ -95,43 +78,20 @@ class Fetcher:
             # selector.unregister(key.fd)
             request = 'GET {} HTTP/1.1\r\nHost: www.uen.org\r\n\r\n'.format(self.url)
             sock.send(request.encode('utf-8'))
-            self.response = yield from read_all(sock)
+
 
         # Register next callback.
-        selector.register(sock.fileno(),
-                          EVENT_WRITE,
-                          on_connected)
+        selector.register(sock.fileno(),EVENT_WRITE, on_connected)
 
+        print("*** yield future to Task ***")
+        # yield f
+        self.response = yield from read_all(sock)
 
-        # selector.unregister(sock.fileno())
+        selector.unregister(sock.fileno())
         print('connected!')
 
-        def read(sock):
-
-            f = Future()
-
-            def on_readable():
-                f.set_result(sock.recv(4096))
-
-            selector.register(sock.fileno(),
-                              EVENT_READ,
-                              on_readable)
-            print("READING: yielding future to Task")
-            chunk = yield f
-            selector.unregister(sock.fileno())
-            return chunk
-
-        def read_all(sock):
-            response = []
-            # Read whole response.
-            chunk = yield from read(sock)
-            while chunk:
-                response.append(chunk)
-                chunk = yield from read(sock)
-
-            return b''.join(response)
-
 stopped = False
+
 
 def loop():
     while not stopped:
@@ -141,6 +101,28 @@ def loop():
             callback = event_key.data
             # callback(event_key, event_mask)
             callback()
+
+
+def read(sock):
+    f = Future()
+
+    def on_readable():
+        f.set_result(sock.recv(4096))
+
+    selector.register(sock.fileno(), EVENT_READ, on_readable)
+    print("READING: yielding future to Task")
+    chunk = yield f
+    selector.unregister(sock.fileno())
+    return chunk
+
+
+def read_all(sock):
+    response = []
+    chunk = yield from read(sock)
+    while chunk:
+        response.append(chunk)
+        chunk = yield from read(sock)
+    return b''.join(response)
 
 
 fetcher = Fetcher('/feeds/lists.shtml')
@@ -153,7 +135,5 @@ loop()
 
 
 
-# for url_key, link_values in url_new_link_map.items():
-#     print('URL: %s' % url_key)
-#     for link_value in link_values:
-#         print('{:@>4}'.format(link_value))
+
+
